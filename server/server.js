@@ -10,7 +10,7 @@ const port = 8080;
 // app.get('/', (req, res) => res.send('Hello World!!!!!'))
 
 //https://expressjs.com/en/guide/writing-middleware.html
-app.use(express.static("../webrtc/build"));
+app.use(express.static("../client/build"));
 // app.get('/', (req, res, next) => {
 //     res.sendFile(__dirname + '/build/index.html')
 // })
@@ -19,7 +19,7 @@ const server = app.listen(port, () =>
   console.log(`Example app listening on port ${port}!`),
 );
 
-io.listen(server);  
+io.listen(server);
 
 // default namespace
 io.on("connection", (socket) => {
