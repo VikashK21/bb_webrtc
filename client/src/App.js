@@ -36,8 +36,9 @@ class App extends Component {
       },
     };
 
-    // DONT FORGET TO CHANGE TO YOUR URL
-    this.serviceIP = "https://bafe-106-51-77-250.ngrok.io/webrtcPeer";
+    // DONT FORGET TO CHANGE THE URL
+    this.serviceIP =
+      "https://4b69-106-51-77-250.ngrok.io/webrtcPeer";
 
     // https://reactjs.org/docs/refs-and-the-dom.html
     // this.localVideoref = React.createRef()
@@ -69,7 +70,7 @@ class App extends Component {
     // https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia
     // see the above link for more constraint options
     const constraints = {
-      audio: true,
+      // audio: true,
       video: true,
       // video: {
       //   width: 1280,
@@ -181,7 +182,9 @@ class App extends Component {
   componentDidMount = () => {
     this.socket = io.connect(this.serviceIP, {
       path: "/io/webrtc",
-      query: {},
+      query: {
+        room: window.location.pathname,
+      },
     });
 
     this.socket.on("connection-success", (data) => {
@@ -189,10 +192,21 @@ class App extends Component {
 
       console.log(data.success);
       const status =
-        data.peerCount > 1 ? `` : "Waiting for other peers to connect";
+        data.peerCount > 1
+          ? `Total Connected Peers to room ${window.location.pathname}: ${data.peerCount}`
+          : "Waiting for other peers to connect";
 
       this.setState({
         status: status,
+      });
+    });
+
+    this.socket.on("joined-peers", (data) => {
+      this.setState({
+        status:
+          data.peerCount > 1
+            ? `Total Connected Peers to room ${window.location.pathname}: ${data.peerCount}`
+            : "Waiting for other peers to connect",
       });
     });
 
@@ -214,6 +228,10 @@ class App extends Component {
           // remoteStream: remoteStreams.length > 0 && remoteStreams[0].stream || null,
           remoteStreams,
           ...selectedVideo,
+          status:
+            data.peerCount > 1
+              ? `Total Connected Peers to room ${window.location.pathname}: ${data.peerCount}`
+              : "Waiting for other peers to connect",
         };
       });
     });
@@ -340,11 +358,9 @@ class App extends Component {
   render() {
     console.log(this.state.localStream);
 
-    // this.setState({
-    //   statusText: (
-    //     <div style={{ color: "yellow", padding: 5 }}>{this.state.status}</div>
-    //   ),
-    // });
+    const statusText = (
+      <div style={{ color: "yellow", padding: 5 }}>{this.state.status}</div>
+    );
 
     return (
       <div>
@@ -360,6 +376,7 @@ class App extends Component {
           }}
           // ref={this.localVideoref}
           videoStream={this.state.localStream}
+          
           autoPlay
           muted
         ></Video>
@@ -389,7 +406,7 @@ class App extends Component {
             borderRadius: 5,
           }}
         >
-          Hey {this.state.status}
+          {statusText}
         </div>
         <div>
           <Videos
