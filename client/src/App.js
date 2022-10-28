@@ -1,9 +1,14 @@
 import React, { Component } from "react";
+import "./App.css";
 
 import io from "socket.io-client";
 
 import Video from "./Components/Video";
 import Videos from "./Components/Videos";
+import Draggable from "./Components/Draggable";
+import Chat from "./Components/Chat";
+
+// import Chat from "./components/chat";
 
 class App extends Component {
   constructor(props) {
@@ -18,7 +23,6 @@ class App extends Component {
       selectedVideo: null,
 
       status: "Please wait...",
-      // statusText: null,
 
       pc_config: {
         iceServers: [
@@ -34,11 +38,14 @@ class App extends Component {
           OfferToReceiveVideo: true,
         },
       },
+
+      messages: [],
+      sendChannels: [],
+      disconnected: false,
     };
 
-    // DONT FORGET TO CHANGE THE URL
-    this.serviceIP =
-      "https://4b69-106-51-77-250.ngrok.io/webrtcPeer";
+    // DONT FORGET TO CHANGE TO YOUR URL
+    this.serviceIP = "https://e20b-106-51-77-250.ngrok.io/webrtcPeer";
 
     // https://reactjs.org/docs/refs-and-the-dom.html
     // this.localVideoref = React.createRef()
@@ -70,7 +77,7 @@ class App extends Component {
     // https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia
     // see the above link for more constraint options
     const constraints = {
-      // audio: true,
+      audio: true,
       video: true,
       // video: {
       //   width: 1280,
@@ -132,18 +139,55 @@ class App extends Component {
       };
 
       pc.ontrack = (e) => {
-        const remoteVideo = {
-          id: socketID,
-          name: socketID,
-          stream: e.streams[0],
-        };
+        let _remoteStream = null;
+        let remoteStreams = this.state.remoteStreams;
+        let remoteVideo = {};
+
+        // 1. check if stream already exists in remoteStreams
+        const rVideos = this.state.remoteStreams.filter(
+          (stream) => stream.id === socketID,
+        );
+
+        // 2. if it does exist then add track
+        if (rVideos.length) {
+          _remoteStream = rVideos[0].stream;
+          _remoteStream.addTrack(e.track, _remoteStream);
+          remoteVideo = {
+            ...rVideos[0],
+            stream: _remoteStream,
+          };
+          remoteStreams = this.state.remoteStreams.map((_remoteVideo) => {
+            return (
+              (_remoteVideo.id === remoteVideo.id && remoteVideo) ||
+              _remoteVideo
+            );
+          });
+        } else {
+          // 3. if not, then create new stream and add track
+          _remoteStream = new MediaStream();
+          _remoteStream.addTrack(e.track, _remoteStream);
+
+          remoteVideo = {
+            id: socketID,
+            name: socketID,
+            stream: _remoteStream,
+          };
+          remoteStreams = [...this.state.remoteStreams, remoteVideo];
+        }
+
+        // const remoteVideo = {
+        //   id: socketID,
+        //   name: socketID,
+        //   stream: e.streams[0]
+        // }
 
         this.setState((prevState) => {
           // If we already have a stream in display let it stay the same, otherwise use the latest stream
+          // const remoteStream = prevState.remoteStreams.length > 0 ? {} : { remoteStream: e.streams[0] }
           const remoteStream =
             prevState.remoteStreams.length > 0
               ? {}
-              : { remoteStream: e.streams[0] };
+              : { remoteStream: _remoteStream };
 
           // get currently selected video
           let selectedVideo = prevState.remoteStreams.filter(
@@ -159,7 +203,7 @@ class App extends Component {
             ...selectedVideo,
             // remoteStream: e.streams[0],
             ...remoteStream,
-            remoteStreams: [...prevState.remoteStreams, remoteVideo],
+            remoteStreams, //: [...prevState.remoteStreams, remoteVideo]
           };
         });
       };
@@ -168,7 +212,12 @@ class App extends Component {
         // alert('GONE')
       };
 
-      if (this.state.localStream) pc.addStream(this.state.localStream);
+      if (this.state.localStream)
+        // pc.addStream(this.state.localStream)
+
+        this.state.localStream.getTracks().forEach((track) => {
+          pc.addTrack(track, this.state.localStream);
+        });
 
       // return pc
       callback(pc);
@@ -198,6 +247,7 @@ class App extends Component {
 
       this.setState({
         status: status,
+        messages: data.messages,
       });
     });
 
@@ -251,7 +301,53 @@ class App extends Component {
       // 1. Create new pc
       this.createPeerConnection(socketID, (pc) => {
         // 2. Create Offer
-        if (pc)
+        if (pc) {
+          // Send Channel
+          const handleSendChannelStatusChange = (event) => {
+            console.log(
+              "send channel status: " + this.state.sendChannels[0].readyState,
+            );
+          };
+
+          const sendChannel = pc.createDataChannel("sendChannel");
+          sendChannel.onopen = handleSendChannelStatusChange;
+          sendChannel.onclose = handleSendChannelStatusChange;
+
+          this.setState((prevState) => {
+            return {
+              sendChannels: [...prevState.sendChannels, sendChannel],
+            };
+          });
+
+          // Receive Channels
+          const handleReceiveMessage = (event) => {
+            const message = JSON.parse(event.data);
+            console.log(message);
+            this.setState((prevState) => {
+              return {
+                messages: [...prevState.messages, message],
+              };
+            });
+          };
+
+          const handleReceiveChannelStatusChange = (event) => {
+            if (this.receiveChannel) {
+              console.log(
+                "receive channel's status has changed to " +
+                  this.receiveChannel.readyState,
+              );
+            }
+          };
+
+          const receiveChannelCallback = (event) => {
+            const receiveChannel = event.channel;
+            receiveChannel.onmessage = handleReceiveMessage;
+            receiveChannel.onopen = handleReceiveChannelStatusChange;
+            receiveChannel.onclose = handleReceiveChannelStatusChange;
+          };
+
+          pc.ondatachannel = receiveChannelCallback;
+
           pc.createOffer(this.state.sdpConstraints).then((sdp) => {
             pc.setLocalDescription(sdp);
 
@@ -260,12 +356,59 @@ class App extends Component {
               remote: socketID,
             });
           });
+        }
       });
     });
 
     this.socket.on("offer", (data) => {
       this.createPeerConnection(data.socketID, (pc) => {
         pc.addStream(this.state.localStream);
+
+        // Send Channel
+        const handleSendChannelStatusChange = (event) => {
+          console.log(
+            "send channel status: " + this.state.sendChannels[0].readyState,
+          );
+        };
+
+        const sendChannel = pc.createDataChannel("sendChannel");
+        sendChannel.onopen = handleSendChannelStatusChange;
+        sendChannel.onclose = handleSendChannelStatusChange;
+
+        this.setState((prevState) => {
+          return {
+            sendChannels: [...prevState.sendChannels, sendChannel],
+          };
+        });
+
+        // Receive Channels
+        const handleReceiveMessage = (event) => {
+          const message = JSON.parse(event.data);
+          console.log(message);
+          this.setState((prevState) => {
+            return {
+              messages: [...prevState.messages, message],
+            };
+          });
+        };
+
+        const handleReceiveChannelStatusChange = (event) => {
+          if (this.receiveChannel) {
+            console.log(
+              "receive channel's status has changed to " +
+                this.receiveChannel.readyState,
+            );
+          }
+        };
+
+        const receiveChannelCallback = (event) => {
+          const receiveChannel = event.channel;
+          receiveChannel.onmessage = handleReceiveMessage;
+          receiveChannel.onopen = handleReceiveChannelStatusChange;
+          receiveChannel.onclose = handleReceiveChannelStatusChange;
+        };
+
+        pc.ondatachannel = receiveChannelCallback;
 
         pc.setRemoteDescription(new RTCSessionDescription(data.sdp)).then(
           () => {
@@ -356,6 +499,12 @@ class App extends Component {
   };
 
   render() {
+    if (this.state.disconnected) {
+      this.socket.close();
+      this.state.localStream.getTracks().forEach((track) => track.stop());
+      return <div>You have successfully Disconnected</div>;
+    }
+
     console.log(this.state.localStream);
 
     const statusText = (
@@ -364,22 +513,37 @@ class App extends Component {
 
     return (
       <div>
-        <Video
-          videoStyles={{
-            zIndex: 2,
+        <Draggable
+          style={{
+            zIndex: 101,
             position: "absolute",
             right: 0,
+            cursor: "move",
+          }}
+        >
+        <Video
+          videoStyles={{
+            // zIndex:2,
+            // position: 'absolute',
+            // right:0,
             width: 200,
-            height: 200,
+            // height: 200,
+            // margin: 5,
+            // backgroundColor: 'black'
+          }}
+          frameStyle={{
+            width: 200,
             margin: 5,
+            borderRadius: 5,
             backgroundColor: "black",
           }}
+          showMuteControls={true}
           // ref={this.localVideoref}
           videoStream={this.state.localStream}
-          
           autoPlay
           muted
         ></Video>
+        </Draggable>
         <Video
           videoStyles={{
             zIndex: 1,
@@ -400,13 +564,31 @@ class App extends Component {
           style={{
             zIndex: 3,
             position: "absolute",
-            margin: 10,
-            backgroundColor: "#cdc4ff4f",
-            padding: 10,
-            borderRadius: 5,
+            // margin: 10,
+            // backgroundColor: '#cdc4ff4f',
+            // padding: 10,
+            // borderRadius: 5,
           }}
         >
-          {statusText}
+          <i
+            onClick={(e) => {
+              this.setState({ disconnected: true });
+            }}
+            style={{ cursor: "pointer", paddingLeft: 15, color: "red" }}
+            class="material-icons"
+          >
+            highlight_off
+          </i>
+          <div
+            style={{
+              margin: 10,
+              backgroundColor: "#cdc4ff4f",
+              padding: 10,
+              borderRadius: 5,
+            }}
+          >
+            {statusText}
+          </div>
         </div>
         <div>
           <Videos
@@ -416,10 +598,28 @@ class App extends Component {
         </div>
         <br />
 
+        <Chat
+          user={{
+            uid: (this.socket && this.socket.id) || "",
+          }}
+          messages={this.state.messages}
+          sendMessage={(message) => {
+            this.setState((prevState) => {
+              return { messages: [...prevState.messages, message] };
+            });
+            this.state.sendChannels.map((sendChannel) => {
+              sendChannel.readyState === "open" &&
+                sendChannel.send(JSON.stringify(message));
+            });
+            this.sendToPeer("new-message", JSON.stringify(message), {
+              local: this.socket.id,
+            });
+          }}
+        />
+
         {/* <div style={{zIndex: 1, position: 'fixed'}} >
           <button onClick={this.createOffer}>Offer</button>
           <button onClick={this.createAnswer}>Answer</button>
-
           <br />
           <textarea style={{ width: 450, height:40 }} ref={ref => { this.textref = ref }} />
         </div> */}

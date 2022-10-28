@@ -9,6 +9,7 @@ const app = express();
 const port = 8080;
 
 const rooms = {};
+const messages = {};
 // app.get('/', (req, res) => res.send('Hello World!!!!!'))
 
 //https://expressjs.com/en/guide/writing-middleware.html
@@ -49,13 +50,16 @@ peers.on("connection", (socket) => {
   rooms[room] =
     (rooms[room] && rooms[room].set(socket.id, socket)) ||
     new Map().set(socket.id, socket);
+  messages[room] = messages[room] || [];
+  console.log(rooms[room]);
 
-  // connectedPeers.set(socket.id, socket);
+  // connectedPeers.set(socket.id, socket)
 
   console.log(socket.id);
   socket.emit("connection-success", {
     success: socket.id,
     peerCount: rooms[room].size,
+    messages: messages[room],
   });
 
   // const broadcast = () => socket.broadcast.emit('joined-peers', {
@@ -88,10 +92,17 @@ peers.on("connection", (socket) => {
     }
   };
 
+  socket.on("new-message", (data) => {
+    console.log("new-message", JSON.parse(data.payload));
+
+    messages[room] = [...messages[room], JSON.parse(data.payload)];
+  });
+
   socket.on("disconnect", () => {
     console.log("disconnected");
     // connectedPeers.delete(socket.id)
     rooms[room].delete(socket.id);
+    messages[room] = rooms[room].size === 0 ? null : messages[room];
     disconnectedPeer(socket.id);
   });
 
@@ -122,7 +133,7 @@ peers.on("connection", (socket) => {
 
   socket.on("answer", (data) => {
     const _connectedPeers = rooms[room];
-    for (let [socketID, socket] of _connectedPeers.entries()) {
+    for (const [socketID, socket] of _connectedPeers.entries()) {
       if (socketID === data.socketID.remote) {
         console.log("Answer", socketID, data.socketID, data.payload.type);
         socket.emit("answer", {
@@ -147,7 +158,7 @@ peers.on("connection", (socket) => {
   socket.on("candidate", (data) => {
     const _connectedPeers = rooms[room];
     // send candidate to the other peer(s) if any
-    for (let [socketID, socket] of _connectedPeers.entries()) {
+    for (const [socketID, socket] of _connectedPeers.entries()) {
       if (socketID === data.socketID.remote) {
         socket.emit("candidate", {
           candidate: data.payload,
